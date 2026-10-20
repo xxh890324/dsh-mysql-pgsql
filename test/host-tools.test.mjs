@@ -197,6 +197,25 @@ assert.match(mixedContext, /mysql_query/)
 assert.match(mixedContext, /pg_query/)
 assert.match(mixedContext, /与其类型匹配的工具族/)
 
+// ── apply() 必须幂等：重复挂载不得抛错、不得让服务缺失 ──────────────────
+// 回归护栏：曾经无条件 Object.defineProperty(service,'typertRemote')，第二次 apply
+// 会抛 TypeError: Cannot redefine property，服务静默不注册（boot.log 里只剩一行
+// provide mysql FAILED），客户端因此永远拿不到 RPC 接口。
+{
+  const again = new Map()
+  let provideCalls = 0
+  const ctx2 = {
+    tools: { register: (tool) => again.set(tool.name, tool) },
+    get: () => undefined,
+    on: () => {},
+    provide: () => { provideCalls += 1 },
+  }
+  assert.doesNotThrow(() => apply(ctx2), '首次 apply 不应抛错')
+  assert.doesNotThrow(() => apply(ctx2), '重复 apply 不应抛错（必须幂等）')
+  assert.equal(again.size, 8)
+  assert.equal(provideCalls, 2, '每次 apply 都应调用 provide')
+}
+
 listeners.get('agent/disposed')({ agent: { id: 'legacy' } })
 const deleted = await mysql.deleteConnection({ connectionId: 'source-prod' })
 assert.equal(deleted.ok, true)
