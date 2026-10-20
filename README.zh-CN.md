@@ -1,7 +1,7 @@
 # dsh-mysql
 
 <p align="center">
-  <b>DeepSeek Harness 的 MySQL 连接与安全数据库工具</b><br />
+  <b>DeepSeek Harness 的 MySQL / PostgreSQL 连接与安全数据库工具</b><br />
   一次配置连接，每个会话可选一个或多个数据源，让 Agent 按工具调用路由到已选数据库。
 </p>
 
@@ -14,7 +14,7 @@
 
 [English](README.md) | 中文
 
-`dsh-mysql` 是一个适用于 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的 profile bundle。它为 DSH 增加 MySQL 多连接设置页、输入栏旁的会话级连接选择器，以及四个带安全限制的数据库工具。无需修改任何 Agent 预设。
+`dsh-mysql` 是一个适用于 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的 profile bundle。它为 DSH 增加 MySQL 与 PostgreSQL 多连接设置页、输入栏旁的会话级连接选择器，以及两族（`mysql_*` / `pg_*`）带安全限制的数据库工具。无需修改任何 Agent 预设。
 
 > **数据边界：**连接配置与密码保存在本机 DSH 存储中；当 Agent 调用数据库工具时，数据库表结构与查询结果会像普通工具结果一样发送给已配置的 LLM 服务商。
 
@@ -22,7 +22,7 @@
 
 | 入口 | 提供能力 |
 | --- | --- |
-| **设置 → MySQL 数据库** | 新增、编辑、删除、测试连接；配置主机、端口、用户名、密码、默认数据库、表访问范围、行写权限与独立的结构变更权限。 |
+| **设置 → 数据库连接** | 新增、编辑、删除、测试 MySQL 或 PostgreSQL 连接；配置数据库类型、主机、端口、用户名、密码、默认数据库、PostgreSQL schema、表访问范围、行写权限与独立的结构变更权限。 |
 | **输入栏数据库按钮** | 为当前会话选择或取消选择一个或多个数据源，每次点击立即生效；输入栏胶囊显示单个名称或简洁的已选数量。 |
 | **Agent 工具 + 运行时上下文** | 提供 `mysql_tables`、`mysql_query`、`mysql_execute`、`mysql_ddl`，并在每轮对话中列出当前会话已选数据源及各自权限。 |
 
@@ -45,6 +45,12 @@
 | `mysql_query` | 在一个已选数据源执行一条只读 `SELECT`、`SHOW`、`DESCRIBE`/`DESC` 或 `EXPLAIN`，支持 `?` 位置参数。多选时传 `connectionId`，单选可省略。拒绝多语句 SQL，按目标数据源校验表范围，最多返回 2000 行序列化结果并用 `truncated` 标记截断。 |
 | `mysql_execute` | 对一个已选数据源执行 `INSERT`、`UPDATE` 或 `DELETE`，支持 `?` 位置参数。多选时传 `connectionId`，单选可省略；要求目标连接开启 `allowWrite: true`。DDL、事务控制语句、多语句 SQL 及其他语句类型都会被拒绝。 |
 | `mysql_ddl` | 在一个已选数据源执行一条作用于表、视图或索引的 `CREATE`/`ALTER`/`DROP`/`RENAME`/`TRUNCATE`。多选时传 `connectionId`，单选可省略。要求目标连接独立开启 `allowDdl: true`；改动/删除目标遵守其表白名单，显式库名前缀必须与其默认库一致。账号/权限语句与库级 DDL 永久拒绝。 |
+| `pg_query` | `mysql_query` 的 PostgreSQL 对应工具：一条只读语句（`SELECT`/`WITH`/`TABLE`/`VALUES`/`EXPLAIN`/`SHOW`）。占位符为 `$1`、`$2`。`WITH` 中若含数据修改语句，按写操作处理并在此拒绝。 |
+| `pg_tables` | 通过 `pg_catalog` 列出列信息，作用域为连接的 schema（未配置时用 `current_schema()`），包含类型、可空性、主键/唯一键与列注释。 |
+| `pg_execute` | 一条 `INSERT`/`UPDATE`/`DELETE`。返回 `{ affectedRows, returnedRows }`；PostgreSQL 没有自增 ID，需要新行值时请在 SQL 末尾加 `RETURNING`。 |
+| `pg_ddl` | 一条作用于表、视图、物化视图或序列的 `CREATE`/`ALTER`/`DROP`/`TRUNCATE`。带 schema 前缀的目标必须与连接的 schema 一致。`DROP INDEX`、`ALTER ... OWNER TO`、`ALTER ... SET SCHEMA` 永久拒绝。 |
+
+每个连接只由一族工具服务。对 PostgreSQL 连接调用 `mysql_query`（或反过来）会被明确拒绝并提示正确的工具名，而不是让 SQL 在错误方言上执行后抛出一句难懂的语法错误。
 
 结构变更权限需要单独开启并确认风险。授权后，可以直接提出建表需求，例如：
 
@@ -77,16 +83,18 @@ SELECT @@port AS server_port, DATABASE() AS database_name, VERSION() AS server_v
 - 需要带 **Web profile** 的 DSH 安装，以及 Node.js **20 或更高版本**。
 - **需要 DSH 0.2.0-rc.2 及以上、低于 0.3.0。** 本插件 0.2.0 版把 Typert RPC 清单迁移到 DSH 0.2 的 strict codec 契约（`create()` factory），不再能在 DSH 0.1.x 上加载 —— 那种环境请使用插件 0.1.11。
 - 需要能通过配置的 TCP 主机与端口访问 MySQL 兼容数据库服务。
-- 当前连接表单支持主机、端口、用户名、密码、默认数据库、表白名单与写权限；没有提供 SSL/TLS、Unix socket / 命名管道或字符集配置项。
-- `MAX_EXECUTION_TIME` 优化器提示面向支持该特性的 MySQL 版本（MySQL 5.7.8+）。MariaDB 对该提示的处理可能不同；`SHOW`、`DESCRIBE`、`EXPLAIN` 不会注入该提示。
+- 当前连接表单支持数据库类型、主机、端口、用户名、密码、默认数据库、PostgreSQL schema、表白名单与写权限；**两种数据库都没有**提供 SSL/TLS、Unix socket / 命名管道或字符集配置项。
+- `MAX_EXECUTION_TIME` 优化器提示面向支持该特性的 MySQL 版本（MySQL 5.7.8+）。MariaDB 对该提示的处理可能不同；`SHOW`、`DESCRIBE`、`EXPLAIN` 不会注入该提示。**PostgreSQL 永不注入该提示**（它会直接语法错误），改为在连接上设置 `statement_timeout`。
 - `mysql_tables` 使用 `DATABASE()` 查询当前默认库中的表。如果未配置默认数据库，表结构列表可能为空。
+- `pg_tables` 使用连接的 **schema**（默认 `public`）。PostgreSQL 连接仍然需要默认数据库，因为 PG 是按具体数据库认证的。
+- PostgreSQL 连接的日期与时间戳通过每连接池独立的类型解析器按字符串返回，`timestamptz` 不会被 JSON 序列化悄悄转成 UTC。
 
 ## 安装、更新与卸载
 
 ### 从 GitHub 安装
 
 ```powershell
-dsh plugin --profile web add github:1321928757/dsh-mysql#v0.3.1
+dsh plugin --profile web add github:1321928757/dsh-mysql#v0.4.0
 ```
 
 ### 从 npm 安装
@@ -200,6 +208,11 @@ Agent 执行只读查询后，工具结果会显示在对话中：
 - 2000 行限制作用于数据库结果已经获取之后的 JSON 返回内容。
 - `mysql_execute` 仍仅处理行写入，不提供事务管理或二次确认。`mysql_ddl` 也没有逐次确认；它通过按连接授权、表白名单和默认库边界约束。请使用权限范围足够窄的数据库账号。
 - 连接配置面向 TCP 连接，界面没有 SSL/TLS、Unix socket / 命名管道或字符集选择项。
+- **PostgreSQL 标识符大小写：**未加双引号的标识符折叠为小写；`"Quoted"` 保留大小写，并与表白名单**区分大小写**匹配。裸写的 `users` 白名单项**不会**命中以 `"Users"` 建的表——这是 PostgreSQL 自身语义；拒绝信息会原样回显该标识符，便于直接修正。
+- **PostgreSQL schema 作用域：**裸表名白名单项沿用 MySQL 的宽松语义，命中任意 schema 的同名表。需要跨 schema 隔离时请写成 `schema.table`。未配置 schema 时，任何显式带 schema 前缀的 DDL 目标都会被拒绝。
+- **PostgreSQL 的 `DROP INDEX` 被 `pg_ddl` 拒绝：**不查系统目录就无法把索引名映射回表名，白名单无法生效。确需使用请手工执行，或扩展 `lib/dialects/postgres.js`。
+- **PostgreSQL 没有自增 ID 与 warning 计数。**`pg_execute` 返回 `{ affectedRows, returnedRows }`，绝不伪造 `insertId: 0`；需要新行值时请加 `RETURNING`。`pg_ddl` 同样不返回 `warningCount`。
+- **占位符不会被自动改写。**MySQL 工具用 `?`，PostgreSQL 工具用 `$1, $2`。这里刻意**不做** `?` → `$n` 的自动转换，因为 PostgreSQL 的 `jsonb` 运算符（`?`、`?|`、`?&`）会被它破坏。
 
 ## 工作原理
 
@@ -207,13 +220,17 @@ Agent 执行只读查询后，工具结果会显示在对话中：
 输入栏 / 设置页
         │  浏览器槽位 + Typert RPC（remote.mysql.*）
         ▼
-Host mysql 服务
-        │  会话级选择 + 懒加载 mysql2 连接池
+Host 服务（服务名仍为 "mysql"）
+        │  会话级选择 + 按方言懒加载连接池
+        ├── lib/dialects/mysql.js     → mysql2 池、information_schema、反引号词法
+        ├── lib/dialects/postgres.js  → pg 池、pg_catalog、双引号词法
         ├── 本地 JSON：$DSH_HOME/storages/dsh-mysql/connections.json
         └── systemPrompt.context：已选数据源 + 各自范围与权限
 ```
 
-- **Host bundle（`lib/index.js`）**：注册四个模型工具，管理懒加载的 mysql2 连接池，持久化连接配置，维护每个会话的已选数据源集合，并提供 `mysql` 服务。已解析目标的工具结果会带上数据源名称和 `connectionId`；已解析目标的错误也会使用相同前缀，但不会暴露凭据。
+- **Host bundle（`lib/index.js`）** 与方言无关：持久化连接配置、维护每个会话的已选数据源集合、解析 `connectionId` 路由，并提供 `mysql` 服务。两族工具由同一个工厂按方言适配器生成，因此读/写/DDL 的防护逻辑只写一遍。
+- **方言适配器（`lib/dialects/`）** 承担真正不同的部分：池参数、结果形状、占位符样式、系统目录 SQL、标识符词法、语句分类与错误文案。新增方言只需加一个文件 + 一条注册表项。
+- **共用词法核心（`lib/shared.js`）** 负责语句分类、表引用与 DDL 目标提取、白名单校验。它接受可选词法配置（默认 `MYSQL_LEX`，PostgreSQL 传 `PG_LEX`），安全规则因此只有一份。
 - **Typert 清单（`lib/typert.host.js`）**：通过 `remote.mysql.*` 向浏览器暴露连接增删改查、测试、选择和表列表方法。
 - **浏览器 bundle（`lib/client.js`）**：注册 `conversation.input.left` 数据库控件与 `settings.section` 连接管理页面；界面样式使用 DSH 的 `--dsw-*` 主题令牌。
 - 已选数据源通过 `systemPrompt.context` 作为动态尾部上下文追加，因此调整选择集合不会重写稳定的系统提示词前缀缓存。多选时，上下文会要求模型每次工具调用只传入一个已选数据源的 `connectionId`。
@@ -275,29 +292,55 @@ Host mysql 服务
 逐个检查 JavaScript 文件，运行共享函数测试与 Typert 契约测试，然后打包本地构件：
 
 ```powershell
-Get-ChildItem lib\*.js | ForEach-Object { node --check $_.FullName }
+Get-ChildItem lib\*.js, lib\dialects\*.js | ForEach-Object { node --check $_.FullName }
 node test\shared.test.mjs
 node test\typert.test.mjs
 node test\client-typert.test.mjs
+node test\postgres-lex.test.mjs
+node test\dialect-contract.test.mjs
+node test\session-selection.test.mjs
+node test\host-tools.test.mjs
 pnpm pack
 ```
 
 `node test\typert.test.mjs` 校验 Host 侧 `./typert` 清单（7 个 strict `create()` codec）；`node test\client-typert.test.mjs` 在受控环境里物化 `lib/client.js`，按 DSH 0.2 的规则校验客户端 remote 描述符与槽位注册。
 
-仓库还提供隔离的 DSH 0.2 验收脚本。它们绝不触碰既有 `dsh web` 实例：两者都使用一次性 `DSH_HOME`、一次性 profile 与一次性端口。
+`test/postgres-lex.test.mjs` 锁定 PostgreSQL 专属词法规则（双引号标识符、`#>>`、美元引用、`WITH`/`TABLE`/`VALUES`），**同时**对每个用例断言 MySQL 行为未变。`test/dialect-contract.test.mjs` 断言两个适配器暴露相同的方法集与返回形状，让「少一个方法」在测试期暴露而不是查询期。`test/host-tools.test.mjs` 覆盖跨方言路由：验证对 PostgreSQL 连接调用 `mysql_query` 会被拒绝并提示 `pg_*`。
+
+`test/db-integration.test.mjs` 是可选联调，不设置环境变量时**绝不连接任何数据库**：
+
+```bash
+DSH_TEST_MYSQL_URL='mysql://user:pw@127.0.0.1:3306/dsh_test' \
+DSH_TEST_PG_URL='postgres://user:pw@127.0.0.1:5432/dsh_test' \
+node test/db-integration.test.mjs
+```
+
+它对每种数据库跑同一组 9 条语义断言（连通、建表、写、读结果形状、列元数据、表列表、时间戳按字符串返回、引号标识符白名单、清理），只创建自己的 `dsh_it_probe` 表。
+
+仓库还提供隔离的 DSH 0.2 验收脚本。它们绝不触碰既有 `dsh web` 实例：都使用一次性 `DSH_HOME`、一次性 profile 与一次性端口。
 
 ```powershell
-pwsh -NoProfile -File scripts\dsh02-headless-smoke.ps1   # Host 组合、Typert loader、四个工具注册
+pwsh -NoProfile -File scripts\dsh02-headless-smoke.ps1   # Host 组合、Typert loader、8 个工具注册
 pwsh -NoProfile -File scripts\dsh02-web-smoke.ps1        # 客户端 boot 图、槽位渲染、真实无头浏览器
-pwsh -NoProfile -File scripts\dsh02-web-smoke.ps1 -RpcProbe   # 额外用真实 UI 打通 MySQL 的 RPC 面
+pwsh -NoProfile -File scripts\dsh02-web-smoke.ps1 -RpcProbe   # 额外用真实 UI 打通 RPC 面
 ```
+
+macOS 与 Linux 使用功能等价的 bash 版本（同样的断言，不依赖 PowerShell）：
+
+```bash
+scripts/smoke-host.sh                 # Host 组合、Typert loader、8 个工具全部注册
+scripts/smoke-web.sh                  # 客户端 boot 图、槽位渲染、CDP 驱动的无头 Chrome
+scripts/smoke-web.sh --rpc            # 额外用真实 UI 打通 RPC 面
+```
+
+两者都会拒绝使用 3080 端口，并在退出时清理自己的进程树与一次性 `DSH_HOME`。
 
 `-RpcProbe` 会用真实浏览器驱动渲染出的 UI，逐个走通 `listConnections`、`saveConnection`、`testConnection`、`getSelection`、`selectConnection`、`deleteConnection`，并校验结构变更默认关闭、未单独确认风险时不能保存、编辑已授权连接时权限会保留、能力徽标可区分、明文密码从不进入 DOM、保存的连接在刷新页面后仍在，且探针结束后会自行删除连接。`listTables` 客户端从不调用（它服务于 Host 工具），因此由契约测试覆盖。
 
 将打包结果安装到独立测试 profile，验证真实 bundle：
 
 ```powershell
-dsh plugin --profile demo add .\dsh-mysql-0.3.1.tgz
+dsh plugin --profile demo add .\dsh-mysql-0.4.0.tgz
 dsh --profile demo --dump-config
 ```
 

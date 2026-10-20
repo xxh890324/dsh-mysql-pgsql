@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.0
+
+- **新增 PostgreSQL 连接支持。** 设置页可选择数据库类型（MySQL / PostgreSQL），按类型联动默认端口（3306 / 5432）与默认用户（root / postgres），并为 PostgreSQL 提供 schema 字段。既有 `connections.json` 没有 `type` 字段时一律按 MySQL 处理，**无需任何迁移**。
+- 新增 `pg_query` / `pg_tables` / `pg_execute` / `pg_ddl` 四件工具，与既有 `mysql_*` 四件工具按方言分族。对错误方言的调用会被明确拒绝并提示正确的工具名，不再让 SQL 在错误方言上执行后才以语法错误暴露。
+- 抽出方言适配层 `lib/dialects/`（`mysql.js` / `postgres.js` / `index.js`）。MySQL 侧逻辑逐字搬迁，行为不变；`lib/index.js` 只保留方言无关的连接管理、会话选择与工具工厂。
+- `lib/shared.js` 的词法函数改为接受可选 `lex` 参数（默认 `MYSQL_LEX`），新增 `PG_LEX`。同一套语句分类 / 白名单 / DDL 目标提取 / 作用域边界逻辑被两种方言复用，**安全规则只有一份**。
+- 修复三处在 PostgreSQL 下会导致白名单静默失效的问题：双引号标识符被当作字符串抹除、`#>` / `#>>` 运算符被当作 `#` 行注释截断、`WITH` 数据修改 CTE 被当作只读。同时修复 `DROP INDEX`（无法映射回表名）与 `ALTER ... OWNER TO` / `SET SCHEMA`（跨作用域提权）的漏检。
+- PostgreSQL 专属处理：查询结果对象形状归一、`$n` 占位符（不做 `?` 自动改写，避免破坏 `jsonb` 的 `?` 运算符）、`pg_catalog` 元数据并把列别名对齐到 MySQL 列名以复用 `groupColumnMetadata`、每连接池独立的时间戳字符串化解析器（不污染全局 `pg.types`）、连接级 `statement_timeout`（PG 不支持 `MAX_EXECUTION_TIME` 提示）、池 `error` 事件监听（避免空闲连接出错导致宿主进程崩溃）。
+- 能力标记改为显式：`pg_execute` 返回 `{ affectedRows, returnedRows }` 且**不伪造** `insertId`，`pg_ddl` 不返回 `warningCount`。
+- 新增测试：`test/postgres-lex.test.mjs`（33 组）、`test/dialect-contract.test.mjs`（22 组）、`test/db-integration.test.mjs`（环境变量门控，未设置时跳过且不连接数据库）；`test/host-tools.test.mjs` 扩展为双方言路由与权限覆盖。
+- 新增 macOS / Linux 验收脚本 `scripts/smoke-host.sh` 与 `scripts/smoke-web.sh`（含 `--rpc`），与既有 PowerShell 脚本断言等价；两者都拒绝 3080 端口并自行清理。同时修复 `scripts/web-rpc-probe.mjs` 在新版 DSH 外壳下找不到设置入口的问题（设置已收进「账号菜单」）。
+- 设置页与输入栏文案中性化：`MySQL 数据库` → `数据库连接`；连接卡片与选择项显示方言徽标；PostgreSQL 连接在副标题中显示 schema。服务名与 7 个 RPC 方法保持不变，wire 契约向后兼容。
+
 ## v0.3.1
 
 - 新增会话级多数据源选择：每个会话可选择零个、一个或多个数据源；多选时每次工具调用必须明确指定一个 `connectionId`，不会广播或合并结果。

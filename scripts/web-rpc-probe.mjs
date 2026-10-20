@@ -5,7 +5,7 @@
  * 6 个 RPC 方法（第 7 个 `listTables` 客户端从不调用，由 test/typert.test.mjs 与
  * test/client-typert.test.mjs 的契约测试覆盖）：
  *
- *   - listConnections   打开 设置 → MySQL 数据库，空态文案渲染成功；
+ *   - listConnections   打开 设置 → 数据库连接，空态文案渲染成功；
  *   - saveConnection    填写表单并保存，卡片出现、通知"已保存"，密码不落 DOM；
  *   - listConnections   刷新页面后卡片仍在（证明连接来自磁盘而非 React 状态）；
  *   - testConnection    无 3306 监听时优雅失败（connect ECONNREFUSED），无未捕获异常；
@@ -127,17 +127,42 @@ const setField = (index, value) => evaluate(`(() => {
   el.dispatchEvent(new Event('input', { bubbles: true }))
   return true
 })()`)
+/**
+ * 打开设置面板。
+ *
+ * 不同 DSH 版本把设置入口放在两个位置：有的直接是 aria-label="设置" 的按钮，
+ * 有的收在「账号菜单」弹出的菜单里（DSH 0.2.1 就是这样）。两种都尝试，
+ * 避免探针因为外壳 UI 变化而整体失效。
+ */
 const openSettings = async () => {
-  await evaluate(`(() => {
-    const btn = Array.from(document.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === '设置')
-    if (btn !== undefined) btn.click()
+  const opened = await evaluate(`(() => {
+    const direct = Array.from(document.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === '设置')
+    if (direct !== undefined) { direct.click(); return 'direct' }
+    const account = document.querySelector('button[aria-label="账号菜单"]')
+    if (account !== null) { account.click(); return 'account' }
+    return 'none'
   })()`)
+  if (opened === 'account') {
+    await sleep(800)
+    await evaluate(`(() => {
+      const item = Array.from(document.querySelectorAll('[role="menuitem"], [role="menu"] button, button'))
+        .find((node) => /^设置/.test((node.innerText || '').replace(/\s+/g, ' ').trim()))
+      if (item !== undefined) item.click()
+    })()`)
+  }
   await sleep(2000)
 }
-const openMysqlSection = async () => {
+/**
+ * 打开设置页里的数据库分区。
+ *
+ * 该分区的标题在支持 PostgreSQL 之后从「MySQL 数据库」改成了「数据库连接」，
+ * 因此这里用 /MySQL|数据库/ 同时兼容旧标题与安装中的旧插件版本；
+ * 取最后一个匹配项是因为左侧导航里也有一个同名条目。
+ */
+const openDbSection = async () => {
   await evaluate(`(() => {
     const target = Array.from(document.querySelectorAll('button'))
-      .filter((b) => /MySQL/.test(b.textContent || '')).pop()
+      .filter((b) => /MySQL|数据库/.test(b.textContent || '')).pop()
     if (target !== undefined) target.click()
   })()`)
   return waitFor('document.querySelectorAll(".dsh-mysql-settings").length >= 1', 15000)
@@ -164,7 +189,7 @@ record('控件为 is-off 而非 is-warn（getSelection 未报错）', /dsh-mysql
 
 // ── 阶段 1：设置页分区（listConnections）───────────────────────────────────
 await openSettings()
-record('settings.section 分区渲染（listConnections RPC）', await openMysqlSection())
+record('settings.section 分区渲染（listConnections RPC）', await openDbSection())
 const removed = await deleteExistingConnections()
 record('设置页为空态（无遗留连接）', /还没有配置任何连接/.test(await settingsText()), 'cleaned=' + removed)
 // 让空列表加载完成后才打开新建流程。
@@ -206,7 +231,7 @@ await send('Page.reload')
 await sleep(2500)
 const backAfterReload = await waitFor('document.querySelectorAll(".dsh-mysql-root").length >= 1', timeoutMs)
 await openSettings()
-const reopened = await openMysqlSection()
+const reopened = await openDbSection()
 const reloadedText = reopened ? await waitForSettingsSettled() : ''
 record(
   '刷新后连接仍在（connections.json 已落盘）',
@@ -242,7 +267,7 @@ record('按钮转为选中态且显示单连接信息', /is-(on|off)/.test(selec
 
 // 通过现有设置页另存第二个探针连接，验证面板多选和批量摘要。
 await openSettings()
-await openMysqlSection()
+await openDbSection()
 record('点击「添加连接」创建第二个选择器数据源', await clickInSettings('添加连接'))
 record('第二个连接表单出现', await waitFor('document.querySelectorAll(".dsh-mysql-settings .dsh-mysql-input").length >= 5', 10000))
 await setField(0, PROBE_SECOND_NAME)
@@ -269,7 +294,7 @@ record('空选择状态仍保留在当前会话，选择列表未关闭', (await
 
 // ── 阶段 6：删除（deleteConnection）并清理 ────────────────────────────────
 await openSettings()
-await openMysqlSection()
+await openDbSection()
 record('点击「删除」并二次确认（deleteConnection RPC）', (await deleteExistingConnections(3)) >= 1)
 record('删除后回到空态（探针无残留）', /还没有配置任何连接/.test(await settingsText()))
 

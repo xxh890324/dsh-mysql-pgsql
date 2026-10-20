@@ -1,7 +1,7 @@
 {
   "name": "dsh-mysql",
-  "version": "0.3.1",
-  "description": "DeepSeek Harness MySQL 连接插件：在设置页配置多套 MySQL 连接（每连接可配表白名单、行写与结构变更权限），输入栏一键切换当前会话的数据库连接，为所有 Agent 预设全局提供 mysql_query / mysql_tables / mysql_execute / mysql_ddl 工具。MySQL connector for DeepSeek Harness: configure multiple connections in settings (per-connection table allowlist, row-write and schema-change permissions), switch the active connection from the composer, and expose mysql_query / mysql_tables / mysql_execute / mysql_ddl tools globally to every agent preset.",
+  "version": "0.4.0",
+  "description": "DeepSeek Harness 数据库连接插件：在设置页配置多套 MySQL / PostgreSQL 连接（每连接可配表白名单、行写与结构变更权限），输入栏一键切换当前会话的数据源，为所有 Agent 预设全局提供 mysql_query / mysql_tables / mysql_execute / mysql_ddl 与 pg_query / pg_tables / pg_execute / pg_ddl 工具。Database connector for DeepSeek Harness: configure multiple MySQL and PostgreSQL connections in settings (per-connection table allowlist, row-write and schema-change permissions), switch the active data sources from the composer, and expose mysql_* / pg_* tools globally to every agent preset.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -22,6 +22,7 @@
     "lib/session-selection.js",
     "lib/typert.host.js",
     "lib/client.js",
+    "lib/dialects",
     "cordis.patch.yml",
     "README.md",
     "README.zh-CN.md",
@@ -37,6 +38,8 @@
     "dsh",
     "dsh-plugin",
     "mysql",
+    "postgresql",
+    "postgres",
     "database",
     "sql",
     "tools",
@@ -49,6 +52,7 @@
   },
   "dependencies": {
     "mysql2": "^3.11.0",
+    "pg": "^8.23.1",
     "zod": "^4.4.3"
   },
   "peerDependencies": {

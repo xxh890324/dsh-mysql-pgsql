@@ -1,7 +1,7 @@
 # dsh-mysql
 
 <p align="center">
-  <b>MySQL connections and guarded database tools for DeepSeek Harness</b><br />
+  <b>MySQL and PostgreSQL connections with guarded database tools for DeepSeek Harness</b><br />
   Configure connections once, choose one or more per conversation, and let your agent route each call to a selected data source.
 </p>
 
@@ -14,7 +14,7 @@
 
 English | [中文](README.zh-CN.md)
 
-`dsh-mysql` is a profile bundle for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). It adds a settings page for multiple MySQL connections, a per-session connection picker beside the composer, and four guarded tools that every agent preset can use. No preset edits are required.
+`dsh-mysql` is a profile bundle for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). It adds a settings page for multiple MySQL and PostgreSQL connections, a per-session connection picker beside the composer, and two families of guarded tools (`mysql_*` and `pg_*`) that every agent preset can use. No preset edits are required.
 
 > **Data boundary:** connection settings and passwords stay in your local DSH storage. Database schema and query results are sent to the LLM provider as ordinary tool output when the agent uses a database tool.
 
@@ -22,7 +22,7 @@ English | [中文](README.zh-CN.md)
 
 | Surface | What it provides |
 | --- | --- |
-| **Settings → MySQL 数据库** | Add, edit, delete, and test connections. Configure host, port, user, password, default database, table scope, row-write permission, and independent schema-change permission. |
+| **Settings → 数据库连接** | Add, edit, delete, and test MySQL or PostgreSQL connections. Configure database type, host, port, user, password, default database, PostgreSQL schema, table scope, row-write permission, and independent schema-change permission. |
 | **Composer database button** | Select or deselect one or more data sources for the current session. Each click takes effect immediately; the composer pill shows the single name or a compact selected count. |
 | **Agent tools + runtime context** | `mysql_tables`, `mysql_query`, `mysql_execute`, and `mysql_ddl`, plus a per-turn context snapshot listing this session's selected sources and capabilities. |
 
@@ -45,6 +45,12 @@ English | [中文](README.zh-CN.md)
 | `mysql_query` | Executes one read-only `SELECT`, `SHOW`, `DESCRIBE`/`DESC`, or `EXPLAIN` statement against one selected source. Pass `connectionId` when multiple sources are selected; it may be omitted for a single selection. Optional `?` parameters are supported. It rejects multi-statement SQL, applies the target source's table-scope check, and returns up to 2,000 serialized rows with a `truncated` flag. |
 | `mysql_execute` | Executes one `INSERT`, `UPDATE`, or `DELETE` statement against one selected source. Pass `connectionId` when multiple sources are selected; it may be omitted for a single selection. Requires that target's `allowWrite: true`; DDL, transaction-control statements, multi-statement SQL, and other statement types are rejected. |
 | `mysql_ddl` | Executes one `CREATE`/`ALTER`/`DROP`/`RENAME`/`TRUNCATE` statement on tables, views, or indexes in one selected source. Pass `connectionId` when multiple sources are selected; it may be omitted for a single selection. It requires that target's independent `allowDdl: true` setting; changed/deleted targets obey its allowlist and all explicit database qualifiers must match its default database. Account/privilege statements and database-level DDL are always rejected. |
+| `pg_query` | The PostgreSQL counterpart of `mysql_query`: one read statement (`SELECT`/`WITH`/`TABLE`/`VALUES`/`EXPLAIN`/`SHOW`). Placeholders are `$1`, `$2`. A `WITH` clause containing a data-modifying statement is treated as a write and rejected here. |
+| `pg_tables` | Lists columns via `pg_catalog`, scoped to the connection's schema (or `current_schema()` when unset). Includes type, nullability, primary/unique key, and column comment. |
+| `pg_execute` | One `INSERT`/`UPDATE`/`DELETE`. Returns `{ affectedRows, returnedRows }`; PostgreSQL has no insert id, so append `RETURNING` if you need the new row. |
+| `pg_ddl` | One `CREATE`/`ALTER`/`DROP`/`TRUNCATE` on tables, views, materialized views, or sequences. Schema-qualified targets must match the connection's schema. `DROP INDEX`, `ALTER ... OWNER TO`, and `ALTER ... SET SCHEMA` are always rejected. |
+
+Each connection is served by exactly one tool family. Calling `mysql_query` against a PostgreSQL connection (or `pg_query` against MySQL) is rejected with an explicit message naming the correct tools, rather than letting the SQL fail later with a confusing syntax error.
 
 Schema changes require a separate opt-in and risk acknowledgement. Once enabled, you can ask the agent to create a table, for example:
 
@@ -76,17 +82,19 @@ The picker changes the session's selected set immediately. A session with multip
 
 - A DSH installation with the **Web profile** and Node.js **20 or newer**.
 - **DSH 0.2.0-rc.2 or newer, below 0.3.0.** Version 0.2.0 of this plugin migrates its Typert RPC manifest to the DSH 0.2 strict codec contract (`create()` factory) and no longer loads on DSH 0.1.x — use plugin 0.1.11 there.
-- A MySQL-compatible server reachable through the configured TCP host and port.
-- The connection form currently supports host, port, username, password, default database, table allowlist, and write permission. It does not expose SSL/TLS, Unix socket/named-pipe, or charset options.
-- The `MAX_EXECUTION_TIME` optimizer hint is intended for MySQL versions that support it (MySQL 5.7.8+). MariaDB may handle this hint differently; `SHOW`, `DESCRIBE`, and `EXPLAIN` do not receive the hint.
+- A MySQL-compatible **or** PostgreSQL server reachable through the configured TCP host and port.
+- The connection form currently supports database type, host, port, username, password, default database, PostgreSQL schema, table allowlist, and write permission. It does not expose SSL/TLS, Unix socket/named-pipe, or charset options — for either database.
+- The `MAX_EXECUTION_TIME` optimizer hint is intended for MySQL versions that support it (MySQL 5.7.8+). MariaDB may handle this hint differently; `SHOW`, `DESCRIBE`, and `EXPLAIN` do not receive the hint. **PostgreSQL never receives this hint** (it would be a syntax error); `statement_timeout` is set on the connection instead.
 - `mysql_tables` discovers tables in `DATABASE()`. Configure a default database if you want schema discovery; a connection without one can return an empty table list.
+- `pg_tables` discovers tables in the connection's **schema** (default `public`). A PostgreSQL default database is still needed for the connection itself, because PostgreSQL authenticates against a specific database.
+- PostgreSQL connections persist dates and timestamps as strings (via a per-pool type parser), so `timestamptz` values are not silently converted to UTC by the JSON serialiser.
 
 ## Install, update, or remove
 
 ### Install from GitHub
 
 ```powershell
-dsh plugin --profile web add github:1321928757/dsh-mysql#v0.3.1
+dsh plugin --profile web add github:1321928757/dsh-mysql#v0.4.0
 ```
 
 ### Install from npm
@@ -200,6 +208,11 @@ Passwords are stored as plain text in `$DSH_HOME/storages/dsh-mysql/connections.
 - The 2,000-row limit applies to the returned JSON payload after the database response has been fetched.
 - `mysql_execute` remains limited to row writes; it does not provide transaction management or a confirmation workflow. `mysql_ddl` has no per-call approval; it is guarded by a per-connection opt-in, allowlist, and default-database boundary. Use a narrowly scoped database account.
 - Connection configuration is TCP-oriented and has no UI for SSL/TLS, Unix sockets/named pipes, or character-set selection.
+- **PostgreSQL identifier case:** unquoted identifiers fold to lower case; `"Quoted"` identifiers keep their case and are matched case-sensitively against the table allowlist. A bare `users` allowlist entry will **not** match a table created as `"Users"` — this is PostgreSQL's own semantics, and the rejection message echoes the exact identifier so the fix is obvious.
+- **PostgreSQL schema scoping:** a bare `tablename` allowlist entry matches that table in any schema (the same permissive rule MySQL uses). To isolate across schemas, write `schema.tablename`. Without a configured schema, any explicitly schema-qualified DDL target is rejected.
+- **PostgreSQL `DROP INDEX` is refused** by `pg_ddl`: an index name cannot be mapped back to its table without a catalog round-trip, so the allowlist could not be enforced. Enable it manually or extend the adapter (see `lib/dialects/postgres.js`).
+- **PostgreSQL has no insert id or warning count.** `pg_execute` returns `{ affectedRows, returnedRows }` and never fabricates `insertId: 0`; append `RETURNING` to get new row values. Likewise `pg_ddl` omits `warningCount`.
+- **Placeholders are not rewritten.** MySQL tools take `?`; PostgreSQL tools take `$1, $2`. There is deliberately no automatic `?` → `$n` translation, because PostgreSQL's `jsonb` operators (`?`, `?|`, `?&`) would be corrupted by it.
 
 ## How it works
 
@@ -207,13 +220,17 @@ Passwords are stored as plain text in `$DSH_HOME/storages/dsh-mysql/connections.
 Composer / Settings UI
         │  browser slot + Typert RPC (remote.mysql.*)
         ▼
-Host mysql service
-        │  per-session selection + lazy mysql2 pool
+Host service (key stays "mysql")
+        │  per-session selection + per-dialect lazy pool
+        ├── lib/dialects/mysql.js     → mysql2 pool, information_schema, backtick lexer
+        ├── lib/dialects/postgres.js  → pg pool, pg_catalog, double-quote lexer
         ├── local JSON: $DSH_HOME/storages/dsh-mysql/connections.json
         └── systemPrompt.context: selected sources + per-source scopes/capabilities
 ```
 
-- **Host bundle (`lib/index.js`)** registers the four model tools, manages lazy mysql2 pools, persists connections, tracks each session's selected source set, and provides the `mysql` service. Every resolved tool result includes the selected source name and `connectionId`; a resolved error is prefixed the same way without exposing credentials.
+- **Host bundle (`lib/index.js`)** is dialect-agnostic: it persists connections, tracks each session's selected source set, resolves `connectionId` routing, and provides the `mysql` service. Tool families are produced by one factory driven by the dialect adapter, so read/write/DDL guardrails are written once.
+- **Dialect adapters (`lib/dialects/`)** own everything that genuinely differs: pool options, result shape, placeholder style, catalog SQL, identifier lexing, statement classification, and error wording. Adding a dialect means adding one file plus one registry entry.
+- **Shared lexical core (`lib/shared.js`)** classifies statements, extracts table references and DDL targets, and enforces allowlists. It takes an optional lexer (`MYSQL_LEX` by default, `PG_LEX` for PostgreSQL), so the security rules live in exactly one place.
 - **Typert manifest (`lib/typert.host.js`)** exposes connection CRUD, testing, selection, and table-list methods to the browser through `remote.mysql.*`.
 - **Browser bundle (`lib/client.js`)** registers the `conversation.input.left` database control and the `settings.section` connection-management page. UI styles consume DSH `--dsw-*` theme tokens.
 - The selected sources are added through `systemPrompt.context` as a dynamic tail section, so changing the selection set does not rewrite the stable cached system-prompt prefix. When multiple sources are selected, the context instructs the model to pass exactly one selected `connectionId` per tool call.
@@ -275,29 +292,55 @@ No. The browser receives a safe connection view containing `hasPassword`, not th
 Syntax-check each JavaScript file individually, run the shared-function and Typert contract tests, then pack a local artifact:
 
 ```powershell
-Get-ChildItem lib\*.js | ForEach-Object { node --check $_.FullName }
+Get-ChildItem lib\*.js, lib\dialects\*.js | ForEach-Object { node --check $_.FullName }
 node test\shared.test.mjs
 node test\typert.test.mjs
 node test\client-typert.test.mjs
+node test\postgres-lex.test.mjs
+node test\dialect-contract.test.mjs
+node test\session-selection.test.mjs
+node test\host-tools.test.mjs
 pnpm pack
 ```
 
 `node test\typert.test.mjs` validates the Host `./typert` manifest (seven strict `create()` codecs), and `node test\client-typert.test.mjs` materializes `lib/client.js` in a controlled environment to validate the Client remote descriptors and slot registrations against the DSH 0.2 rules.
 
-The repository also ships isolated DSH 0.2 acceptance scripts. They never touch an existing `dsh web` instance: both use a throwaway `DSH_HOME`, a throwaway profile, and a one-shot port.
+`test/postgres-lex.test.mjs` pins the PostgreSQL-specific lexing rules (double-quoted identifiers, `#>>`, dollar quoting, `WITH`/`TABLE`/`VALUES`) **and** asserts that MySQL behaviour is unchanged for every case. `test/dialect-contract.test.mjs` asserts that both adapters expose the same method set and return shapes, so a missing method fails at test time instead of at query time. `test/host-tools.test.mjs` covers cross-dialect routing: it verifies that `mysql_query` on a PostgreSQL connection is rejected with a message naming `pg_*`.
+
+`test/db-integration.test.mjs` is opt-in and never touches a database unless you ask:
+
+```bash
+DSH_TEST_MYSQL_URL='mysql://user:pw@127.0.0.1:3306/dsh_test' \
+DSH_TEST_PG_URL='postgres://user:pw@127.0.0.1:5432/dsh_test' \
+node test/db-integration.test.mjs
+```
+
+It runs the same nine semantic assertions against each database (connect, DDL, write, read shape, column metadata, table list, timestamp-as-string, quoted-identifier allowlist, cleanup) and creates only its own `dsh_it_probe` table.
+
+The repository also ships isolated DSH 0.2 acceptance scripts. They never touch an existing `dsh web` instance: all of them use a throwaway `DSH_HOME`, a throwaway profile, and a one-shot port.
 
 ```powershell
 pwsh -NoProfile -File scripts\dsh02-headless-smoke.ps1   # Host composition, Typert loader, tool registration
 pwsh -NoProfile -File scripts\dsh02-web-smoke.ps1        # Client boot graph, slot rendering, real headless browser
-pwsh -NoProfile -File scripts\dsh02-web-smoke.ps1 -RpcProbe   # ... plus a UI-driven pass over the MySQL RPC surface
+pwsh -NoProfile -File scripts\dsh02-web-smoke.ps1 -RpcProbe   # ... plus a UI-driven pass over the RPC surface
 ```
+
+macOS and Linux use the bash equivalents (same assertions, no PowerShell dependency):
+
+```bash
+scripts/smoke-host.sh                 # Host composition, Typert loader, all 8 tools registered
+scripts/smoke-web.sh                  # Client boot graph, slot rendering, headless Chrome via CDP
+scripts/smoke-web.sh --rpc            # ... plus a UI-driven pass over the RPC surface
+```
+
+Both refuse port 3080 and clean up their own process tree and throwaway `DSH_HOME` on exit.
 
 `-RpcProbe` drives the rendered UI through a real browser to exercise `listConnections`, `saveConnection`, `testConnection`, `getSelection`, `selectConnection`, and `deleteConnection`, and checks that schema-change authorization defaults off, cannot be saved without its separate acknowledgement, is preserved when editing an authorized connection, that capability badges are distinguishable, the plaintext password never reaches the DOM, a saved connection survives a page reload, and the probe removes its own connection afterwards. `listTables` is never called by the client (it exists for the Host tools), so it is covered by the contract tests instead.
 
 Install the packed artifact into a scratch profile and verify the real bundle:
 
 ```powershell
-dsh plugin --profile demo add .\dsh-mysql-0.3.1.tgz
+dsh plugin --profile demo add .\dsh-mysql-0.4.0.tgz
 dsh --profile demo --dump-config
 ```
 
