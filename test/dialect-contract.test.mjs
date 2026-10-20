@@ -207,6 +207,35 @@ test('describeError 各自标注方言', () => {
   assert.match(PG.describeError({ code: '42P01' }), /^PostgreSQL 错误/)
 })
 
+test('PG 的「连接未建立即断开」补上排查提示，可读错误保持原样', () => {
+  // pg 在这类失败上只给一句 Connection terminated unexpectedly，没有 code/errno，
+  // 用户无法区分地址不可达、端口不通还是超时。适配器需要把排查方向点明。
+  const vague = PG.describeError(new Error('Connection terminated unexpectedly'))
+  assert.match(vague, /Connection terminated unexpectedly/)
+  assert.match(vague, /连接未建立即被对端关闭/)
+  assert.match(vague, /10000ms/) // 连接超时时长要写出来
+  // 自带可读 message 的错误不得被追加噪音
+  assert.equal(
+    PG.describeError(new Error('password authentication failed for user "u"')),
+    'password authentication failed for user "u"',
+  )
+  assert.equal(
+    PG.describeError(Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' })),
+    'connect ECONNREFUSED 127.0.0.1:5432',
+  )
+})
+
+test('MySQL 的同类连接失败也补上排查提示', () => {
+  const vague = MYSQL.describeError(new Error('Connection lost: The server closed the connection.'))
+  assert.match(vague, /连接未建立即被对端关闭/)
+  assert.match(vague, /10000ms/)
+  // 真实 ER_* 错误保持原样
+  assert.equal(
+    MYSQL.describeError(Object.assign(new Error("Table 'x' doesn't exist"), { code: 'ER_NO_SUCH_TABLE', errno: 1146 })),
+    "Table 'x' doesn't exist",
+  )
+})
+
 test('scopeLabel 给出可读作用域描述', () => {
   assert.match(MYSQL.scopeLabel({ database: 'devdb' }), /devdb/)
   assert.match(PG.scopeLabel({ database: 'appdb', schema: 'public' }), /public/)

@@ -94,7 +94,7 @@ SELECT @@port AS server_port, DATABASE() AS database_name, VERSION() AS server_v
 ### 从 GitHub 安装
 
 ```powershell
-dsh plugin --profile web add github:1321928757/dsh-mysql#v0.4.0
+dsh plugin --profile web add github:1321928757/dsh-mysql#v0.4.1
 ```
 
 ### 从 npm 安装
@@ -264,6 +264,17 @@ Host 服务（服务名仍为 "mysql"）
 
 检查主机、端口、账号密码、默认数据库、服务器连通性，以及 MySQL 账号的网络访问权限。连接由 DSH Host 发起，而不是浏览器发起。启动诊断日志位于 `$DSH_HOME/storages/dsh-mysql/boot.log`。
 
+两种驱动的连接失败文案差异很大，插件统一整理成一行可读文本，并且**绝不回显密码**：
+
+| 情况 | 你会看到 |
+| --- | --- |
+| 密码错误 | `Access denied for user 'x'@'host' (using password: YES)` / `password authentication failed for user "x"` |
+| 库不存在 | `Unknown database 'x'` / `database "x" does not exist` |
+| 端口无人监听 | `connect ECONNREFUSED 127.0.0.1:5432` |
+| 主机不可达 / 连接超时 | 驱动原文 **加上** 明确提示（写出 10000ms 连接超时），避免把超时误判成认证问题 |
+
+两种驱动在超时场景给出的原文都**没有**「超时」二字（`Connection lost: The server closed the connection.` 与 `Connection terminated unexpectedly`），因此只有这两条会被追加说明，其余错误原样透传。
+
 </details>
 
 <details>
@@ -340,7 +351,7 @@ scripts/smoke-web.sh --rpc            # 额外用真实 UI 打通 RPC 面
 将打包结果安装到独立测试 profile，验证真实 bundle：
 
 ```powershell
-dsh plugin --profile demo add .\dsh-mysql-0.4.0.tgz
+dsh plugin --profile demo add .\dsh-mysql-0.4.1.tgz
 dsh --profile demo --dump-config
 ```
 

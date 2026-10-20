@@ -94,7 +94,7 @@ The picker changes the session's selected set immediately. A session with multip
 ### Install from GitHub
 
 ```powershell
-dsh plugin --profile web add github:1321928757/dsh-mysql#v0.4.0
+dsh plugin --profile web add github:1321928757/dsh-mysql#v0.4.1
 ```
 
 ### Install from npm
@@ -262,7 +262,18 @@ Open **Settings → MySQL 数据库** and save at least one connection. In the c
 <details>
 <summary><b>Connection tests fail</b></summary>
 
-Check the host and port, credentials, default database, server reachability, and the MySQL account's network permissions. The plugin connects from the DSH host, not from the browser. For startup diagnostics, inspect `$DSH_HOME/storages/dsh-mysql/boot.log`.
+Check the host and port, credentials, default database, server reachability, and the account's network permissions. The plugin connects from the DSH host, not from the browser. For startup diagnostics, inspect `$DSH_HOME/storages/dsh-mysql/boot.log`.
+
+Both drivers report a failed connection attempt in very different ways, so the plugin normalises them into one readable line that never echoes the password:
+
+| Situation | What you see |
+| --- | --- |
+| Wrong password | `Access denied for user 'x'@'host' (using password: YES)` / `password authentication failed for user "x"` |
+| Wrong database | `Unknown database 'x'` / `database "x" does not exist` |
+| Nothing listening | `connect ECONNREFUSED 127.0.0.1:5432` |
+| Host unreachable / connect timeout | The driver's own vague message **plus** an explicit hint naming the 10000 ms connect timeout, so a timeout is not mistaken for an authentication problem |
+
+Both drivers give the timeout case a message that does not actually say "timeout" (`Connection lost: The server closed the connection.` and `Connection terminated unexpectedly`). Those two exact messages are annotated with the connect timeout value; every other error passes through unchanged.
 
 </details>
 
@@ -340,7 +351,7 @@ Both refuse port 3080 and clean up their own process tree and throwaway `DSH_HOM
 Install the packed artifact into a scratch profile and verify the real bundle:
 
 ```powershell
-dsh plugin --profile demo add .\dsh-mysql-0.4.0.tgz
+dsh plugin --profile demo add .\dsh-mysql-0.4.1.tgz
 dsh --profile demo --dump-config
 ```
 

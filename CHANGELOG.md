@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.1
+
+- 连接失败文案可诊断性：两种驱动在「连接未建立即被对端关闭」时给出的原文分别是 `Connection lost: The server closed the connection.`（mysql2）与 `Connection terminated unexpectedly`（pg），都**没有**说是超时还是地址不通，且 pg 的这条错误连 `code`/`errno` 都没有。现在只有这两条会被追加「请检查主机/端口可达性，或连接超时 10000ms 是否过短」，其余错误（`ER_*`、`28P01`、`3D000`、`ECONNREFUSED` 等）原样透传。
+- `test/db-integration.test.mjs` 从 9 组断言扩展到 15 组/方言（共 30 组）：新增错误凭证（并断言错误文案不含密码）、错误端口、`LIMIT/OFFSET` 分页、CTE + 聚合 + 窗口函数、`UPDATE`/`DELETE` 行数、以及超出池上限的并发查询（验证排队而非报错）。
+- `test/dialect-contract.test.mjs` 增加 2 组断言，锁定上述两条超时文案的追加规则，并断言自带可读 message 的错误不会被追加噪音（共 24 组）。
+- 文档补充两种方言连接失败的对照表（错误密码 / 库不存在 / 端口不通 / 主机不可达），中英文同步。
+
 ## v0.4.0
 
 - **新增 PostgreSQL 连接支持。** 设置页可选择数据库类型（MySQL / PostgreSQL），按类型联动默认端口（3306 / 5432）与默认用户（root / postgres），并为 PostgreSQL 提供 schema 字段。既有 `connections.json` 没有 `type` 字段时一律按 MySQL 处理，**无需任何迁移**。

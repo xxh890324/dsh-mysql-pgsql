@@ -140,6 +140,65 @@ async function runSuite(type, rawUrl) {
       assert.equal(dialect.allowlistMatch(refs, ['some_other_table']).ok, false)
     })
 
+    await step('错误凭证被拒绝且不泄露密码', async () => {
+      const badPool = dialect.createPool(dialect.poolConfig({ ...cfg, password: 'definitely-wrong-pw' }), { limit: 1 })
+      try {
+        await dialect.query(badPool, dialect.probeSql, [])
+        assert.fail('错误凭证竟然连通了')
+      } catch (err) {
+        const message = String(dialect.describeError(err))
+        assert.ok(message.length > 0, '错误文案不能为空')
+        assert.equal(message.includes('definitely-wrong-pw'), false, '错误文案不得回显密码')
+      } finally {
+        await dialect.endPool(badPool)
+      }
+    })
+
+    await step('错误端口给出可读错误', async () => {
+      const deadPool = dialect.createPool(dialect.poolConfig({ ...cfg, port: 1 }), { limit: 1 })
+      try {
+        await dialect.query(deadPool, dialect.probeSql, [])
+        assert.fail('连到端口 1 竟然成功了')
+      } catch (err) {
+        assert.ok(String(dialect.describeError(err)).length > 0)
+      } finally {
+        await dialect.endPool(deadPool)
+      }
+    })
+
+    await step('分页 LIMIT/OFFSET 可用', async () => {
+      const ph = (n) => (type === 'postgres' ? '$' + n : '?')
+      await exec('DELETE FROM ' + TABLE)
+      const rows = type === 'postgres' ? '($1,$2),($3,$4),($5,$6)' : '(?,?),(?,?),(?,?)'
+      await exec('INSERT INTO ' + TABLE + ' (id, name) VALUES ' + rows, [1, 'a', 2, 'b', 3, 'c'])
+      const page1 = await run('SELECT id FROM ' + TABLE + ' ORDER BY id LIMIT ' + ph(1) + ' OFFSET ' + ph(2), [2, 0])
+      const page2 = await run('SELECT id FROM ' + TABLE + ' ORDER BY id LIMIT ' + ph(1) + ' OFFSET ' + ph(2), [2, 2])
+      assert.equal(page1.rows.length, 2)
+      assert.equal(page2.rows.length, 1)
+    })
+
+    await step('复杂查询（CTE + 聚合 + 窗口函数）可用', async () => {
+      const agg = await run(
+        'WITH c AS (SELECT COUNT(*) AS n FROM ' + TABLE + ') SELECT n, ROW_NUMBER() OVER (ORDER BY n) AS rn FROM c',
+      )
+      assert.equal(agg.rows.length, 1)
+      assert.equal(Number(agg.rows[0].n), 3)
+      assert.equal(Number(agg.rows[0].rn), 1)
+    })
+
+    await step('UPDATE / DELETE 返回受影响行数', async () => {
+      const upd = await exec('UPDATE ' + TABLE + ' SET name = ' + (type === 'postgres' ? '$1' : '?') + ' WHERE id = ' + (type === 'postgres' ? '$2' : '?'), ['z', 1])
+      assert.equal(upd.affectedRows, 1)
+      const del = await exec('DELETE FROM ' + TABLE + ' WHERE id = ' + (type === 'postgres' ? '$1' : '?'), [3])
+      assert.equal(del.affectedRows, 1)
+    })
+
+    await step('多并发查询不超池上限（排队而非报错）', async () => {
+      const results = await Promise.all([1, 2, 3, 4, 5].map(() => run(dialect.probeSql, [])))
+      assert.equal(results.length, 5)
+      assert.ok(results.every((res) => res.rows.length === 1))
+    })
+
     await step('DROP TABLE（清理）', async () => {
       await run('DROP TABLE IF EXISTS ' + TABLE)
     })
